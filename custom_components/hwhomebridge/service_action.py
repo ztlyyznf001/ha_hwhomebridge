@@ -191,12 +191,32 @@ class ServiceActionDispatcher:
         - button: press 操作（on=0 → press 取消，on=1 → 由 on_command 处理，忽略）
         - select: select_option 操作（on=0 → 选 stop_option，on=1 → 由 on_command 处理，忽略）
         - switch/light/fan: turn_on/turn_off 操作
+        - cover: open_cover/close_cover 操作（兼容开关产品）
         """
         if not self._hass:
             return False
 
         power_on = payload.get("on", 0) == 1
         domain = entity_id.split('.')[0]
+
+        if domain == "cover":
+            # A malformed command must never default to closing a physical cover.
+            on = payload.get("on")
+            if type(on) not in (int, bool) or on not in (0, 1):
+                return False
+            state = self._hass.states.get(entity_id)
+            if state is None or state.state in ("unknown", "unavailable", ""):
+                return False
+            # HA CoverEntityFeature: OPEN=1, CLOSE=2. Older entities may omit it.
+            features = state.attributes.get("supported_features")
+            if features is not None and not (int(features) & (1 if on else 2)):
+                return False
+            self._call_service_async(
+                domain="cover",
+                service="open_cover" if on else "close_cover",
+                entity_id=entity_id,
+            )
+            return True
 
         # button 域：只有 press，没有 turn_on/turn_off
         if domain == "button":

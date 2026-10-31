@@ -553,6 +553,13 @@ class ServiceRouter:
         char_name = svc_def.char_name
         c_svc_id = svc_def.c_service_id or service_id
 
+        if value_attr == "state" and domain == "cover":
+            # Only a fully closed cover is off; closing is still physically open.
+            value = self._cover_switch_state(entity_state.state)
+            if value is not None:
+                self._update_hw_bridge_status(sn, c_svc_id, {char_name: value})
+            return
+
         if value_attr == "state" and domain in ("switch", "light", "fan"):
             # switch 类型：上报 on/off
             is_on = entity_state.state == "on"
@@ -883,6 +890,15 @@ class ServiceRouter:
                       f"svcId='{svc_id}', payload={merged_payload}")
         return json.dumps(merged_payload)
 
+    @staticmethod
+    def _cover_switch_state(state: str) -> Optional[int]:
+        """Keep push reports and SDK queries consistent; never invent unavailable state."""
+        if state == "closed":
+            return 0
+        if state in ("open", "opening", "closing"):
+            return 1
+        return None
+
     def _build_char_state_json(self, svc_id: str, svc_def: 'ServiceDef',
                                 entity_state, entity_id: str, vd=None) -> Optional[str]:
         """根据 service 定义和 entity 状态，构建 HilinkGetBrgDevCharState 所需的 JSON
@@ -911,6 +927,10 @@ class ServiceRouter:
         state_value = entity_state.state
 
         try:
+            if value_attr == "state" and domain == "cover":
+                value = self._cover_switch_state(state_value)
+                return json.dumps({char_name: value}) if value is not None else None
+
             # --- switch / light / fan: 返回 on/off ---
             if value_attr == "state" and domain in ("switch", "light", "fan"):
                 is_on = (state_value == "on")

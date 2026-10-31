@@ -16,7 +16,7 @@ from typing import List
 
 
 VALID_ACTION_DOMAIN_MAP = {
-    "turn_on_off": ["switch", "light", "fan", "select"],
+    "turn_on_off": ["switch", "light", "fan", "select", "cover"],
     "set_brightness": ["light"],
     "set_color_temp": ["light"],
     "set_color": ["light"],

@@ -1,0 +1,39 @@
+{
+    "pid": "008",
+    "match_rules": [
+        {
+            "type": "model_keyword",
+            "keywords": [
+                "curtain"
+            ]
+        },
+        {
+            "type": "name_keyword",
+            "keywords": [
+                "窗帘",
+                "curtain"
+            ]
+        }
+    ],
+    "services": {
+        "switch": {
+            "domain": "cover",
+            "action": "turn_on_off",
+            "value_attr": "state",
+            "include_keywords": [],
+            "exclude_keywords": []
+        },
+        "electric": {
+            "domain": null
+        },
+        "voltage": {
+            "domain": null
+        },
+        "power": {
+            "domain": null
+        },
+        "current": {
+            "domain": null
+        }
+    }
+}

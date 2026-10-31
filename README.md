@@ -1,5 +1,7 @@
 # hwhomebridge
 
+本 fork 的 `feat/curtain-compat` 分支新增窗帘开关兼容适配，复用 PID 008；不提供原生窗帘界面。详见[行为、限制与部署说明](docs/curtain-compat.md)。
+
 > **⚠️ WARNING**
 > 
 > 本项目非Home Assistant官方集成，仅实测了部分厂家设备，处于持续迭代中，存在适配兼容与稳定性风险，**请勿直接用于生产环境**。
