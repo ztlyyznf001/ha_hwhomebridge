@@ -216,6 +216,11 @@ class SNManager:
                     return vd.sn
         return None
 
+    def get_virtual_devices_by_entity(self, entity_id: str) -> list:
+        """A cover may feed both its open/close switch and its position card."""
+        return [vd for vd in self.sn_virtual_device_map.values()
+                if entity_id in vd.get_all_entity_ids()]
+
     def get_virtual_device_by_entity(self, entity_id: str) -> Optional[VirtualDevice]:
         """根据 entity_id 查找其所属 VirtualDevice"""
         for vd in self.sn_virtual_device_map.values():

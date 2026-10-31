@@ -18,6 +18,7 @@ from .product_matcher import ProductMatcher, DeviceInfo
 from .virtual_device import VirtualDevice, ServiceEntry, SNManager
 from .service_action import ServiceActionDispatcher
 from .native_async import submit_native
+from .curtain_controls import cover_value
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -446,6 +447,14 @@ class ServiceRouter:
         Returns:
             service ID，找不到时返回 None
         """
+        # Lamp UIs can send on + brightness together: positioning must win
+        # regardless of JSON key order; a power-only command is the stop button.
+        brightness = vd.product.services.get("brightness")
+        if ("brightness" in payload and brightness is not None
+                and brightness.ha_mapping.action == "set_cover_position"
+                and "brightness" in vd.service_entries):
+            return "brightness"
+
         key_service_candidates = {
             "on": ["switch", "action"],
             "brightness": ["brightness"],
@@ -553,9 +562,9 @@ class ServiceRouter:
         char_name = svc_def.char_name
         c_svc_id = svc_def.c_service_id or service_id
 
-        if value_attr == "state" and domain == "cover":
+        if domain == "cover":
             # Only a fully closed cover is off; closing is still physically open.
-            value = self._cover_switch_state(entity_state.state)
+            value = cover_value(mapping, entity_state)
             if value is not None:
                 self._update_hw_bridge_status(sn, c_svc_id, {char_name: value})
             return
@@ -890,15 +899,6 @@ class ServiceRouter:
                       f"svcId='{svc_id}', payload={merged_payload}")
         return json.dumps(merged_payload)
 
-    @staticmethod
-    def _cover_switch_state(state: str) -> Optional[int]:
-        """Keep push reports and SDK queries consistent; never invent unavailable state."""
-        if state == "closed":
-            return 0
-        if state in ("open", "opening", "closing"):
-            return 1
-        return None
-
     def _build_char_state_json(self, svc_id: str, svc_def: 'ServiceDef',
                                 entity_state, entity_id: str, vd=None) -> Optional[str]:
         """根据 service 定义和 entity 状态，构建 HilinkGetBrgDevCharState 所需的 JSON
@@ -927,8 +927,8 @@ class ServiceRouter:
         state_value = entity_state.state
 
         try:
-            if value_attr == "state" and domain == "cover":
-                value = self._cover_switch_state(state_value)
+            if domain == "cover":
+                value = cover_value(mapping, entity_state)
                 return json.dumps({char_name: value}) if value is not None else None
 
             # --- switch / light / fan: 返回 on/off ---

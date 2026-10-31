@@ -1,6 +1,6 @@
 # hwhomebridge
 
-本 fork 的 `feat/curtain-compat` 分支新增窗帘开关兼容适配，复用 PID 008；不提供原生窗帘界面。详见[行为、限制与部署说明](docs/curtain-compat.md)。
+本 fork 的 `feat/curtain-compat` 分支支持窗帘全开/全关（PID 008），并新增开度滑块与暂停卡片（PID 002）；不提供原生窗帘界面。详见[行为、限制与部署说明](docs/curtain-compat.md)。
 
 > **⚠️ WARNING**
 > 

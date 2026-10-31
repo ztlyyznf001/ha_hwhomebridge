@@ -33,6 +33,7 @@ from homeassistant.const import (
 )
 
 from .service_router import ServiceRouter
+from .curtain_controls import build_companion, companion_id, cover_value
 from .pin_manager import PINManager
 from .virtual_device import SNManager
 from .const import SKIP_PLATFORMS, DOMAIN
@@ -440,6 +441,11 @@ def OnDevStatusCB(sn_data, svcId):
         state = ghass.states.get(entity_id)
         domain = entity_id.split('.')[0] if entity_id else ""
         
+        if domain == "cover":
+            svc = vd.product.services.get(svc_id_decoded)
+            value = cover_value(svc.ha_mapping, state) if svc else None
+            return value if value is not None else 0
+
         # 特殊处理：button/select 域没有 on/off 状态，使用缓存的 switch_state
         # button: 电饭煲取消按钮（小米电饭煲）
         # select: 电饭煲工作状态 select（美的电饭煲），通过 text_to_enum 映射后缓存
@@ -723,7 +729,7 @@ def OnGetRoomInfoCB(sn_ptr, roomName_ptr, devName_ptr):
                 # 其次：原始 HA 设备的 name_by_user 或 name
                 orig_entry = None
                 if not dev_name:
-                    orig_entry = dev_reg.devices.get(vd.ha_device_id)
+                    orig_entry = dev_reg.devices.get(getattr(vd, "source_device_id", vd.ha_device_id))
                     if orig_entry:
                         dev_name = orig_entry.name_by_user or orig_entry.name or ""
 
@@ -732,7 +738,7 @@ def OnGetRoomInfoCB(sn_ptr, roomName_ptr, devName_ptr):
                 if bridge_entry and bridge_entry.area_id:
                     area_id = bridge_entry.area_id
                 elif orig_entry is None:
-                    orig_entry = dev_reg.devices.get(vd.ha_device_id)
+                    orig_entry = dev_reg.devices.get(getattr(vd, "source_device_id", vd.ha_device_id))
                 if not area_id and orig_entry and orig_entry.area_id:
                     area_id = orig_entry.area_id
 
@@ -946,6 +952,7 @@ def _register_single_device(device_id: str, reuse_sn: str = None, is_update: boo
     if vd is not None:
         if is_excluded:
             vd.online = False
+            _register_curtain_controls(vd, name, model, manufacturer, enabled=False)
             _LOGGER.info(f"Device registered to SNManager only (excluded): sn={vd.sn}, device_id={device_id}")
             return True
 
@@ -972,6 +979,7 @@ def _register_single_device(device_id: str, reuse_sn: str = None, is_update: boo
             vd.online = True
 
         _create_bridge_device_entry(vd, name, model, manufacturer)
+        _register_curtain_controls(vd, name, model, manufacturer, enabled=vd.online)
 
         _LOGGER.info(f"Device registered, state sync deferred: sn={vd.sn}, device_id={device_id}, "
                      f"name={name}, model={model}")
@@ -980,6 +988,25 @@ def _register_single_device(device_id: str, reuse_sn: str = None, is_update: boo
         # 匹配失败，静默跳过
         _LOGGER.debug(f"Device {device_id} ({name}, model={model}) did not match any product, skipping")
         return False
+
+
+def _register_curtain_controls(parent, name, model, manufacturer, enabled=True):
+    vd = build_companion(service_router, parent, name)
+    if vd is None:
+        return
+    if not service_router.sn_manager.register(vd):
+        return
+    _create_bridge_device_entry(vd, vd.display_name, model, manufacturer)
+    if not enabled or vd.sn in _excluded_device_sns or _is_device_disabled(vd.sn):
+        vd.online = False
+        if vd.ha_device_id in saved_device_ids:
+            service_router.register_device_to_hilink(vd.sn, 0)
+        return
+    if vd.ha_device_id not in saved_device_ids:
+        service_router.register_device_to_hilink(vd.sn, 3)
+        _save_device_id(vd.ha_device_id)
+    service_router.register_device_to_hilink(vd.sn, 1)
+    vd.online = True
 
 
 # ---------------------------------------------------------------------------
@@ -1000,34 +1027,19 @@ def handle_state_event(event):
     if service_router is None:
         return
 
-    vd = service_router.sn_manager.get_virtual_device_by_entity(entity_id)
-    if vd is None:
-        return
-
-    # 禁用设备不转发状态变化
-    if _is_device_disabled(vd.sn):
-        return
-
-    old_state = event.data['old_state']
-    new_state = event.data['new_state']
-
-    # 处理设备离线状态
-    if new_state and new_state.state == 'unavailable':
-        if vd.online:
-            vd.online = False
-            service_router.register_device_to_hilink(vd.sn, 0)
-            _LOGGER.info(f"Device {entity_id} went offline, notified HiLink")
-        return
-
-    # 处理设备恢复在线
-    if old_state and old_state.state == 'unavailable':
+    old_state = event.data.get('old_state')
+    new_state = event.data.get('new_state')
+    for vd in service_router.sn_manager.get_virtual_devices_by_entity(entity_id):
+        if _is_device_disabled(vd.sn) or vd.sn in _excluded_device_sns:
+            continue
+        if new_state is None or new_state.state in ('unavailable', 'unknown'):
+            if vd.online:
+                vd.online = False
+                service_router.register_device_to_hilink(vd.sn, 0)
+            continue
         if not vd.online:
             vd.online = True
             service_router.register_device_to_hilink(vd.sn, 1)
-            _LOGGER.info(f"Device {entity_id} came back online, notified HiLink")
-
-    # 同步状态到 HiLink
-    if vd.online:
         service_router.report_state(vd.sn, entity_id, new_state)
 
 def handle_device_registry_updated(event):
@@ -1147,6 +1159,9 @@ def _handle_device_remove_event(device_id: str):
     """处理设备删除事件"""
     _LOGGER.info(f"Device removed in HA: device_id={device_id}, reporting offline to HiLink")
     
+    companion = service_router.unregister_device(companion_id(device_id))
+    if companion is not None:
+        _remove_bridge_device_entry(companion.sn)
     vd = service_router.unregister_device(device_id)
     if vd is not None:
         registered_device_ids.discard(device_id)

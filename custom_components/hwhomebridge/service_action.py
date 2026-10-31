@@ -11,6 +11,7 @@ Service Action Dispatcher - 服务操作分发
 """
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -69,6 +70,8 @@ class ServiceActionDispatcher:
         try:
             if action == "turn_on_off":
                 return self._handle_turn_on_off(entity_id, transformed_payload, mapping)
+            elif action in ("set_cover_position", "stop_cover"):
+                return self._handle_cover_control(entity_id, transformed_payload, action)
             elif action == "set_brightness":
                 return self._handle_set_brightness(entity_id, transformed_payload, mapping)
             elif action == "set_color_temp":
@@ -253,6 +256,30 @@ class ServiceActionDispatcher:
             service=service,
             entity_id=entity_id
         )
+        return True
+
+    def _handle_cover_control(self, entity_id, payload, action):
+        if not self._hass or not entity_id.startswith("cover."):
+            return False
+        state = self._hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            return False
+        # CoverEntityFeature: SET_POSITION=4, STOP=8.
+        feature = 4 if action == "set_cover_position" else 8
+        features = state.attributes.get("supported_features", 0)
+        if not isinstance(features, int) or not features & feature:
+            return False
+        data = None
+        if action == "set_cover_position":
+            position = payload.get("brightness")
+            if (not isinstance(position, (int, float)) or isinstance(position, bool)
+                    or not math.isfinite(position) or not 0 <= position <= 100):
+                return False
+            data = {"position": round(position)}
+        elif type(payload.get("on")) not in (int, bool) or payload["on"] not in (0, 1):
+            return False
+        self._call_service_async(domain="cover", service=action,
+                                 entity_id=entity_id, data=data)
         return True
 
     def _handle_set_brightness(self, entity_id: str, payload: dict,
